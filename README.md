@@ -191,4 +191,5 @@ docker compose down -v
 | `GET` | `/api/health` | Service health status and MySQL database connectivity check |
 #   e c o m m e r c e _ a v a i l a b l e  
  #   e c o m m e r c e _ a v a i l a b l e  
+ #   e c o m m e r c e _ a v a i l a b l e  
  
