@@ -190,4 +190,5 @@ docker compose down -v
 | `GET` | `/api/orders/number/{number}` | Retrieve order details by order number (e.g. `ORD-8291A7B2`) |
 | `GET` | `/api/health` | Service health status and MySQL database connectivity check |
 #   e c o m m e r c e _ a v a i l a b l e  
+ #   e c o m m e r c e _ a v a i l a b l e  
  
