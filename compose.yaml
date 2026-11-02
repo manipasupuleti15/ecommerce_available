@@ -1,0 +1,101 @@
+services:
+
+  # ============================================================
+  # SERVICE 1: MySQL 8.4 Database
+  # - Uses official MySQL image (no custom Dockerfile needed)
+  # - Data is stored in a named volume (survives container restarts)
+  # - Port 3306 is NOT published to the host (private to db-net only)
+  # ============================================================
+  db:
+    image: mysql:8.4
+    container_name: ecommerce-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_secure_password_982}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ecommerce}
+      MYSQL_USER: ${MYSQL_USER:-ecommerce_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ecommerce_password_982}
+    volumes:
+      # Persist database data across container restarts
+      - mysql_data:/var/lib/mysql
+      # Run this SQL script when the database is first created
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - db-net          # Only connected to the private database network
+    healthcheck:
+      # Backend will wait until this check passes before starting
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ============================================================
+  # SERVICE 2: Java Spring Boot Backend API
+  # - Built from backend/Dockerfile (multi-stage Maven build)
+  # - Port 8080 is NOT published to the host (private, Nginx accesses it)
+  # - Waits for MySQL to be healthy before starting
+  # - Connected to BOTH networks so it can talk to Nginx AND MySQL
+  # ============================================================
+  backend:
+    build:
+      context: ./backend        # Docker build context = backend/ folder
+      dockerfile: Dockerfile    # Uses backend/Dockerfile
+    container_name: ecommerce-backend
+    restart: unless-stopped
+    environment:
+      # Spring Boot picks these up as datasource config
+      SPRING_DATASOURCE_URL: jdbc:mysql://db:3306/${MYSQL_DATABASE:-ecommerce}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-ecommerce_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:-ecommerce_password_982}
+      SERVER_PORT: 8080
+    depends_on:
+      db:
+        condition: service_healthy   # Wait for MySQL healthcheck to pass
+    networks:
+      - proxy-net   # Nginx can reach the backend through this network
+      - db-net      # Backend can reach MySQL through this network
+
+  # ============================================================
+  # SERVICE 3: React Frontend (Nginx serving the React build)
+  # - Built from frontend/Dockerfile (multi-stage Node + Nginx build)
+  # - Port 80 is the ONLY port published to the host machine
+  # - Nginx reverse-proxies /api/* requests to the backend container
+  # - Only connected to proxy-net (cannot reach MySQL directly)
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend       # Docker build context = frontend/ folder
+      dockerfile: Dockerfile    # Uses frontend/Dockerfile
+    container_name: ecommerce-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"    # HOST:CONTAINER — only published port in the whole stack
+    depends_on:
+      - backend    # Start backend before frontend
+    networks:
+      - proxy-net  # Same network as backend so Nginx can proxy /api/ calls
+
+# ============================================================
+# VOLUMES
+# Named volume keeps MySQL data safe across "docker compose down"
+# Use "docker compose down -v" to also delete the volume (fresh DB)
+# ============================================================
+volumes:
+  mysql_data:
+    driver: local
+    name: ecommerce_mysql_data
+
+# ============================================================
+# NETWORKS
+# Two isolated bridge networks for security:
+#   proxy-net  → frontend ↔ backend  (HTTP traffic)
+#   db-net     → backend  ↔ db       (MySQL traffic, invisible to frontend)
+# ============================================================
+networks:
+  proxy-net:
+    driver: bridge
+    name: ecommerce_proxy_net
+  db-net:
+    driver: bridge
+    name: ecommerce_db_net
